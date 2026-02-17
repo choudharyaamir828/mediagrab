@@ -2,8 +2,8 @@ services:
   - type: web
     name: mediagrab-api
     runtime: python
-    buildCommand: "./build.sh"
-    startCommand: "gunicorn django_rest.wsgi:application"
+    buildCommand: "chmod +x build.sh && ./build.sh"
+    startCommand: "gunicorn django_rest.wsgi:application --bind 0.0.0.0:$PORT --timeout 120"
     envVars:
       - key: DJANGO_SECRET_KEY
         generateValue: true

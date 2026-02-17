@@ -1,8 +1,9 @@
 import os
 import re
+import shutil
 import tempfile
 import yt_dlp
-from django.http import FileResponse, JsonResponse
+from django.http import FileResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -16,6 +17,43 @@ def detect_platform(url):
     elif re.search(r'(instagram\.com|instagr\.am)', url):
         return 'instagram'
     return 'unknown'
+
+
+def get_base_ydl_opts():
+    """
+    Return base yt-dlp options that work on cloud servers.
+    Includes user-agent spoofing, geo bypass, and retry logic
+    to avoid bot detection on platforms like YouTube.
+    """
+    return {
+        'quiet': True,
+        'no_warnings': True,
+        'geo_bypass': True,
+        'nocheckcertificate': True,
+        'socket_timeout': 30,
+        'retries': 5,
+        'extractor_retries': 5,
+        'noplaylist': True,
+        'http_headers': {
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/120.0.0.0 Safari/537.36'
+            ),
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['web'],
+            },
+        },
+    }
+
+
+def has_ffmpeg():
+    """Check if FFmpeg is available on the system."""
+    return shutil.which('ffmpeg') is not None
 
 
 class VideoInfoView(APIView):
@@ -37,11 +75,8 @@ class VideoInfoView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'skip_download': True,
-        }
+        ydl_opts = get_base_ydl_opts()
+        ydl_opts['skip_download'] = True
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -131,11 +166,6 @@ class DownloadVideoView(APIView):
     then streams the file back to the client.
     """
 
-    def _check_ffmpeg(self):
-        """Check if FFmpeg is available on the system."""
-        import shutil
-        return shutil.which('ffmpeg') is not None
-
     def post(self, request):
         serializer = DownloadSerializer(data=request.data)
         if not serializer.is_valid():
@@ -152,73 +182,39 @@ class DownloadVideoView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        has_ffmpeg = self._check_ffmpeg()
+        ffmpeg_available = has_ffmpeg()
 
         # Create a temp directory for the download
         temp_dir = tempfile.mkdtemp()
         output_template = os.path.join(temp_dir, '%(title)s.%(ext)s')
 
+        # Start with cloud-friendly base options
+        ydl_opts = get_base_ydl_opts()
+        ydl_opts['outtmpl'] = output_template
+
         if download_type == 'audio':
-            if has_ffmpeg:
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'outtmpl': output_template,
-                    'quiet': True,
-                    'no_warnings': True,
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '192',
-                    }],
-                }
-            else:
-                # Without FFmpeg, just download best audio stream directly
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'outtmpl': output_template,
-                    'quiet': True,
-                    'no_warnings': True,
-                }
-            # If a specific audio format_id is chosen
+            ydl_opts['format'] = 'bestaudio/best'
+            if ffmpeg_available:
+                ydl_opts['postprocessors'] = [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }]
             if format_id and format_id != 'best':
                 ydl_opts['format'] = format_id
         else:
             # Video download
-            if has_ffmpeg:
-                # With FFmpeg we can merge separate video+audio streams
+            if ffmpeg_available:
                 if format_id and format_id != 'best':
-                    ydl_opts = {
-                        'format': f'{format_id}+bestaudio/best',
-                        'outtmpl': output_template,
-                        'quiet': True,
-                        'no_warnings': True,
-                        'merge_output_format': 'mp4',
-                    }
+                    ydl_opts['format'] = f'{format_id}+bestaudio/best'
                 else:
-                    ydl_opts = {
-                        'format': 'bestvideo+bestaudio/best',
-                        'outtmpl': output_template,
-                        'quiet': True,
-                        'no_warnings': True,
-                        'merge_output_format': 'mp4',
-                    }
+                    ydl_opts['format'] = 'bestvideo+bestaudio/best'
+                ydl_opts['merge_output_format'] = 'mp4'
             else:
-                # Without FFmpeg, use 'best' which is a single stream
-                # containing both video and audio (no merge needed)
                 if format_id and format_id != 'best':
-                    ydl_opts = {
-                        'format': f'{format_id}/best',
-                        'outtmpl': output_template,
-                        'quiet': True,
-                        'no_warnings': True,
-                    }
+                    ydl_opts['format'] = f'{format_id}/best'
                 else:
-                    ydl_opts = {
-                        'format': 'best',
-                        'outtmpl': output_template,
-                        'quiet': True,
-                        'no_warnings': True,
-                    }
+                    ydl_opts['format'] = 'best'
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

@@ -14,6 +14,11 @@ from .serializers import URLSerializer, DownloadSerializer
 logger = logging.getLogger(__name__)
 
 
+def strip_ansi(text):
+    """Remove ANSI color/escape codes from yt-dlp error messages."""
+    return re.sub(r'\x1b\[[0-9;]*m', '', str(text))
+
+
 def detect_platform(url):
     """Detect whether the URL is from YouTube or Instagram."""
     if re.search(r'(youtube\.com|youtu\.be)', url):
@@ -34,10 +39,10 @@ def get_base_ydl_opts():
         'no_warnings': True,
         'geo_bypass': True,
         'nocheckcertificate': True,
-        'socket_timeout': 60,
-        'retries': 10,
-        'extractor_retries': 10,
-        'fragment_retries': 10,
+        'socket_timeout': 20,
+        'retries': 3,
+        'extractor_retries': 3,
+        'fragment_retries': 3,
         'noplaylist': True,
         'http_headers': {
             'User-Agent': (
@@ -48,11 +53,6 @@ def get_base_ydl_opts():
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Referer': 'https://www.google.com/',
-        },
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['web', 'mweb'],
-            },
         },
     }
 
@@ -94,6 +94,7 @@ class VideoInfoView(APIView):
 
         ydl_opts = get_base_ydl_opts()
         ydl_opts['skip_download'] = True
+        ydl_opts['format'] = 'best/bestvideo+bestaudio'  # permissive format for info extraction
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -178,7 +179,7 @@ class VideoInfoView(APIView):
             })
 
         except yt_dlp.utils.DownloadError as e:
-            error_msg = str(e)
+            error_msg = strip_ansi(str(e))
             logger.error("yt-dlp DownloadError for URL %s: %s", url, error_msg)
 
             # Provide user-friendly messages for common errors
@@ -203,7 +204,7 @@ class VideoInfoView(APIView):
             )
         except Exception as e:
             logger.exception("Unexpected error in VideoInfoView for URL %s", url)
-            error_msg = str(e)
+            error_msg = strip_ansi(str(e))
             return Response(
                 {"error": f"An unexpected error occurred: {error_msg}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -322,7 +323,7 @@ class DownloadVideoView(APIView):
                 return response
 
         except yt_dlp.utils.DownloadError as e:
-            error_msg = str(e)
+            error_msg = strip_ansi(str(e))
             logger.error("yt-dlp DownloadError: %s", error_msg)
 
             if 'Sign in to confirm' in error_msg or 'bot' in error_msg.lower():
@@ -340,7 +341,7 @@ class DownloadVideoView(APIView):
         except Exception as e:
             logger.exception("Unexpected error in DownloadVideoView")
             return Response(
-                {"error": f"An unexpected error occurred: {str(e)}"},
+                {"error": f"An unexpected error occurred: {strip_ansi(str(e))}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         finally:

@@ -5,7 +5,7 @@ const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 const api = axios.create({
     baseURL: API_BASE,
-    timeout: 120000, // 2 minute timeout — yt-dlp can take a while
+    timeout: 180000, // 3 minute timeout — Render spin-up (~30s) + yt-dlp processing
     headers: {
         'Content-Type': 'application/json',
     },

@@ -165,7 +165,20 @@ function App() {
       setVideoInfo(info);
       setSelectedFormat('best');
     } catch (err) {
-      const message = err.response?.data?.error || 'Failed to fetch video information. Please check the URL.';
+      let message;
+      if (err.response?.data?.error) {
+        // Server returned an error with a message
+        message = err.response.data.error;
+      } else if (err.response) {
+        // Server returned an error without a proper message
+        message = `Server error (${err.response.status}). Please try again.`;
+      } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        message = 'Request timed out. The server may be busy — please try again.';
+      } else if (err.code === 'ERR_NETWORK' || !err.response) {
+        message = 'Cannot connect to the server. Please check your internet connection or try again later.';
+      } else {
+        message = 'Failed to fetch video information. Please check the URL.';
+      }
       setError(message);
     } finally {
       setLoading(false);

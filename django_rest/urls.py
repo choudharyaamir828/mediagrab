@@ -21,4 +21,7 @@ from django.urls import path, include
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", include("downloader.urls")),
+    # Also serve at root level so /info/ and /download/ work
+    # (handles cases where VITE_API_URL doesn't include /api suffix)
+    path("", include("downloader.urls")),
 ]
